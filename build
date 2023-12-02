@@ -1,0 +1,4 @@
+#!/bin/sh
+echo crystal build --debug src/funa.cr
+crystal build --debug -o ./bin/funa src/funa.cr
+echo Done.

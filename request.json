@@ -1,0 +1,12 @@
+{
+  "method" : "POST",
+  "scheme" : "http",
+  "host" : "localhost",
+  "port" : "2023",
+  "path" : "/post_blob",
+  "query" : "0A0B1C",
+  "body" : "id=1&name=Tom&sex=male",
+  "content_type" : "application/octed-stream",
+  "headers" : "user-agent: funa",
+  "multipart" : "false"
+}

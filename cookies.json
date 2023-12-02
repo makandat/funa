@@ -1,0 +1,4 @@
+{
+  "host" : "localhost",
+  ["Cookie1" : "Value1", "Cookie2" : "Value2", "Cookie3" : "Value3; Expires=Dec 31 2023 00:00:00 UTC"]
+}
