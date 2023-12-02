@@ -1,0 +1,12 @@
+{
+  "method" : "POST",
+  "scheme" : "http",
+  "host" : "localhost",
+  "port" : "2023",
+  "path" : "/post_multipart_form",
+  "query" : "",
+  "body" : "name=number; value=1234, name=file1; filename=/home/makandat/temp/echo.log",
+  "content_type" : "multipart/form-data",
+  "headers" : "user-agent: funa",
+  "multipart" : "true"
+}

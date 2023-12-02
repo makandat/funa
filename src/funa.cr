@@ -7,7 +7,7 @@ require "json"
 # Module Funa
 module Funa
   extend self
-  VERSION = "0.2.2"
+  VERSION = "0.3.0"
   BOUNDARY = "------------------funa_boundary"
   COOKIES_FILE = "cookies.json"
 
@@ -122,7 +122,7 @@ module Funa
         end
         body = sb.to_s
         body = body[0 .. body.size - 1]
-      when "multipart/form-data;" + BOUNDARY then
+      when "multipart/form-data" then
         # Multipart form data
         body = get_mpdata()
       when "application/json" then
@@ -151,17 +151,20 @@ module Funa
     # get multipart form data
     def get_mpdata() : String
       bodysrc = @conf["body"]
+      p! bodysrc
       mdata = MultipartData.new
-      parts : Array(String) = bodysrc.split(", ")
+      parts = bodysrc.split(", ")
       parts.each do |s|
         n = s.index("filename=")
         if !n.nil? && n.as(Int32) > 0
           parts = s.split("; ")
           parts1 = parts[0].split("=")
           if parts1[0] == "name"
-            parts2 = parts1[1].split("; ")
+            name = parts1[1]
+            parts2 = parts[1].split("=")
             if parts2[0] == "filename"
-              mdata.add_file(parts1[1], parts2[1])
+              filepath = parts2[1]
+              mdata.add_file(name, filepath)
             else
               raise Exception.new("Body has no filename.")
             end
@@ -169,9 +172,15 @@ module Funa
             raise Exception.new("Body has no name.")
           end
         else
-          parts1 = s.split("=")
-          if parts1.size == 2
-            mdata.add_item(parts1[0], parts1[1])
+          parts1 = s.split("; ")
+          if parts1[0].starts_with?("name=")
+            parts2 = parts1[0].split("=")
+            name = parts2[1]
+            if parts1[1].starts_with?("value=")
+              parts3 = parts1[1].split("=")
+              value = parts3[1]
+              mdata.add_item(name, value)
+            end
           else
             raise Exception.new("Bad body data.")
           end
@@ -241,7 +250,7 @@ module Funa
       s = @border + "\n"
       s += %(Content-Disposition: form-data; name="#{name}"; filename="#{filename}"\n)
       s += %(Content-Type: application/octet-stream\n\n)
-      fdata = File.read(filename)
+      fdata = File.read(filepath)
       s += fdata + "\n"
       @mdata.push(s)
     end
