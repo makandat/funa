@@ -3,12 +3,11 @@ require "http/client"
 require "http/headers"
 require "uri"
 require "json"
+require "./multipart.cr"
 
 # Module Funa
 module Funa
   extend self
-  VERSION = "0.3.0"
-  BOUNDARY = "------------------funa_boundary"
   COOKIES_FILE = "cookies.json"
 
   # Funa HTTP Client class
@@ -227,107 +226,4 @@ module Funa
       return headers
     end
   end # of class
-
-  # Multipart/Form-Data class
-  class MultipartData
-    # constructor
-    def initialize(border : String = BOUNDARY)
-      @border = "--" + border
-      @mdata = [] of String
-    end
-
-    # add form control data
-    def add_item(name : String, value : String)
-      s = @border + "\n"
-      s += %(Content-Disposition: form-data; name="#{name}"\n\n)
-      s += value + "\n"
-      @mdata.push(s)
-    end
-
-    # add file control data
-    def add_file(name : String, filepath : String)
-      filename = File.basename(filepath)
-      s = @border + "\n"
-      s += %(Content-Disposition: form-data; name="#{name}"; filename="#{filename}"\n)
-      s += %(Content-Type: application/octet-stream\n\n)
-      fdata = File.read(filepath)
-      s += fdata + "\n"
-      @mdata.push(s)
-    end
-
-    # add blob / arrayBuffer data
-    def add_blob(name : String, data : Slice(UInt8))
-      s = @border + "\n"
-      s += %(Content-Disposition: form-data; name="#{name}"\n)
-      s += %(Content-Type: application/octed-stream\n\n)
-      s += data.to_s + "\n"
-      @mdata.push(s)
-    end
-
-    # serialize form data
-    def to_s()
-      s = ""
-      @mdata.each do |x|
-        s += x
-      end
-      s += @border + "--\n"
-    end
-
-  end # of class
-  
-  # main
-  def main()
-    puts "<< Funa HTTP Client " + VERSION + " >>"
-    begin
-      client = FunaClient.new
-    rescue e
-      puts e.message
-    end
-  end
-
-  # Test multipart/form-data  
-  def test_multipart(n = 0)
-    o = MultipartData.new
-    case n
-    when 0
-      o.add_item("text1", "TEXT1")
-      o.add_item("check1", "C1")
-      o.add_item("check2", "")
-      p o.to_s
-    when 1
-      o.add_item("text1", "TEXT1")
-      o.add_file("file1", "./cookies.json")
-      p o.to_s
-    when 2
-      o.add_item("text1", "TEXT1")
-      data = Slice(UInt8).new(5)
-      data.fill(0x45)
-      o.add_blob("blob1", data)
-      p o.to_s    
-    else
-      o.add_item("text1", "TEXT1")
-      o.add_item("text2", "TEXT2")
-      o.add_item("check1", "C1")
-      o.add_item("check2", "")
-      p o.to_s   
-    end
-  end
-
-  # Test cookies
-  def test_cookie()
-    headers = HTTP::Headers.new
-    headers["accept"] = "text/html"
-    headers = FunaClient.add_cookies(headers)
-    headers.each do |kv|
-      name = kv[0]
-      value = kv[1]
-      puts name + "=>" + value.to_s
-    end
-  end
-
-end # of Module
-
-# start
-Funa.main()
-#Funa.test_multipart(2)
-#Funa.test_cookie()
+end # of module
