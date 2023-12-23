@@ -1,0 +1,12 @@
+{
+  "method" : "POST",
+  "scheme" : "http",
+  "host" : "localhost",
+  "port" : "2023",
+  "path" : "/post_blob",
+  "query" : "",
+  "body" : "0A0B1C",
+  "content_type" : "application/octed-stream",
+  "headers" : "user-agent=funa, host=localhost",
+  "multipart" : "false"
+}

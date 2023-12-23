@@ -3,127 +3,197 @@ require "http/client"
 require "http/headers"
 require "uri"
 require "json"
+require "./multipart"
+require "./cookies"
 
 # Module Funa
 module Funa
   extend self
-  VERSION = "0.3.0"
-  BOUNDARY = "------------------funa_boundary"
-  COOKIES_FILE = "cookies.json"
 
   # Funa HTTP Client class
   class FunaClient
     @savePath = ""
     @conf = Hash(String, String).new
     @uri = URI.new("http", "localhost")
-    
-    # constructor
+    @cookies = FunaCookies.new
+
+    # コンストラクタ
     def initialize()
+      # コマンド引数がないときはヘルプを表示して終了。
       if ARGV.size() == 0
         STDERR.puts("Usage: funa URL [savePath] or funa @file.json [savePath]")
         exit 1
       end
+      # 第二コマンド引数があれば、保存先ファイルとみなす。
       if ARGV.size > 1
         @savePath = ARGV[1]
       end
+      # 第一コマンド引数の先頭が @ ならリクエストファイルとみなす。
       if ARGV[0].starts_with?("@")
-        @conf = readConf(ARGV[0][1..])  # ARGV[0] must be config file
+        @conf = readConf(ARGV[0][1..])  # ARGV[0] はリクエストファイル
+        # リクエストファイルの情報から URI を作成する。
         @uri = URI.new(scheme: @conf["scheme"], host: @conf["host"], port: @conf["port"].to_i32, path: @conf["path"], query: @conf["query"])
+        # リクエストファイルの情報からクライアントからサーバへ送るリクエストヘッダを作成する。
+        request_headers = to_headers(@conf["headers"], @conf["content_type"])
+        # HTTP クライアントを作成する。
         client = HTTP::Client.new(@uri)
+        # メソッド別の処理
         case @conf["method"]
         when "GET"
-          response = HTTP::Client.get(@uri, to_headers(@conf["headers"]))
+          response = HTTP::Client.get(@uri, request_headers)  # GET リクエスト
         when "POST"
-          postdata = get_body()
-          response = HTTP::Client.post(@uri, headers: to_headers(@conf["headers"], body:postdata))
+          postdata = get_body()  # ポストする body データを作成する。
+          content_type = @conf["content_type"]
+          if @conf["content_type"].starts_with?("multipart") # マルチパートフォームの場合は境界を追加する。
+            content_type += "; boundary=#{BOUNDARY}"
+            request_headers["content-type"] = content_type
+          end
+          #p! request_headers
+          response = HTTP::Client.post(@uri, request_headers, postdata)  # POST リクエスト
         when "HEAD"
-          response = HTTP::Client.head(@uri, to_headers(@conf["headers"]))
+          response = HTTP::Client.head(@uri, request_headers)  # HEAD リクエスト
         else
           STDERR.puts "Error: not supported."
           exit 1
         end
       else
+        # 第一コマンド引数の先頭が @ でない場合は URL とみなして GET リクエストを行う。
         url = ARGV[0]  # ARGV[0] must be URL
         response = HTTP::Client.get(url)
       end
+      # クッキーがあれば、cookies.json を更新する。
+      updateCookies(response)
+      # レスポンスを表示する。
       printResponse(response)
     end
-    
-    # read @file.json
+
+    # リクエストファイル @file.json を読む。
     def readConf(filepath) : Hash(String, String)
       s = File.read(filepath)
       h = Hash(String, String).from_json(s)
       return h
     end
-    
-    # Add String to Headers
-    def to_headers(s : String, body : HTTP::Client::BodyType = nil) : HTTP::Headers
+
+    # クッキーがあれば、cookies.json を更新する。
+    def updateCookies(response)
+      response.headers.each do |header|
+        hkey = header[0]
+        hval = header[1][0]
+        if hkey == "Set-Cookie"  # ヘッダ行の名前が Set-Cookie なら
+           name = hval[0 .. hval.index("=").as(Int32) - 1]
+           value = hval[hval.index("=").as(Int32) + 1 ..]
+           parts = value.split("; ")
+           value = parts[0]
+           if parts.size > 1
+             parts2 = parts[1].split("=")
+             expires = parts2[1]
+             @cookies.add(name, value, Time.parse_local(expires, "%a, %d %b %Y %H:%M:%S %Z"))
+           else
+             value = parts[1]
+             @cookies.add(name, value)
+           end
+        end
+        @cookies.save_cookies(@conf["host"])
+      end
+    end
+
+    # リクエストファイル (file.json) の headers とcontent_type 行を HTTP::Headers に変換する。
+    def to_headers(srcline : String, content_type : String) : HTTP::Headers
       headers = HTTP::Headers.new
-      parts = s.split(",")
+      headers["content-type"] = content_type  # content-type を HTTP::Headers に追加
+      # リクエストファイルの headers 行をカンマで分解する。
+      parts = srcline.split(", ")
+      # リクエストファイルの headers 行の各部分を = で分割して、それをキーと値みなして HTTP::Headers に追加する。
       parts.each do |x|
-        y = x.split(":")
+        y = x.split("=")
         key = y[0].strip
         value = y[1].strip
-        if ! headers.has_key?(key)
+        if ! headers.has_key?(key)  # キー が HTTP::Headers に含まれていない場合は値として空の配列を用意する。
           headers[key] = Array(String).new
         end
         headers[key] = value
       end
+      # cookie.json ファイルからクッキー情報を追加する。
+      headers["cookie"] = @cookies.to_s
       return headers
     end
-    
-    # print response data
+
+    # サーバから受信したレスポンス情報を表示する。
     def printResponse(response : HTTP::Client::Response)
       puts "-------------- Status ------------------------------"
-      puts response.status
+      puts response.status  # ステータス (HTTP::Status)
       puts "-------------- Response Headers    -----------------"
+      # レスポンスヘッダ
       response.headers.each do |key, arr|
         arr.each do |value|
           puts key + ": " + value
         end
       end
+      # レスポンス本体
       if @savePath == ""
         puts "-------------- Response Body -----------------------"
         puts response.body
         puts "-------------- End of Body -------------------------"
       else
+        # コマンドの第二引数がある場合、それを保存先のファイルとしてレスポンス本体をファイル保存する。
         File.write(@savePath, response.body)
         puts "-------------- Response Body -----------------------"
         puts "The response body was stored to the file '#{@savePath}'."
         puts "-------------- End of Body -------------------------"
       end
     end
-    
-    # From body to Hash(String, String)
+
+    # リクエストファイルの body 行の内容をハッシュに変換する。
     def from_body_to_hash(body : String) : Hash(String, String)
       hash = Hash(String, String).new
-      parts = body.split(", ")
-      parts.each do |s|
-        parts2 = s.split("=")
-        hash[parts2[0]] = parts2[1]
+      parts = body.split(", ") # body 行を ", " で分割する。
+      if parts.size >= 2
+        # 分割された各部分について送り返す。
+        parts.each do |s|
+          # その各部分を = で分割してキーと値としてハッシュに格納する。
+          parts2 = s.split("=")
+          name = parts2[0].strip
+          value = parts2[1].strip
+          hash[name] = value
+        end
+      else
+        # カンマが含まれないとき
+        parts3 = body.split("=")  # = で body 全体を分割する。
+        if parts.size < 2
+          # = が含まれないとき
+          hash["body"] = body
+        else
+          hash[parts3[0].strip] = parts3[1].strip  # 分割後の２つの値をキーと値としてハッシュに格納する。
+        end
       end
       return hash
     end
-    
-    # Make body data
+
+    # クライアント側のリクエストボディ本体を作成する。
     def get_body() : HTTP::Client::BodyType # Alias BodyType is IO | Slice(UInt8) | String | Nil.
       if @conf["method"] != "POST" || @conf.has_key?("body") == false
         return ""
       end
+     # リクエストファイルの body 行の内容をハッシュに変換する。
       hashbody : Hash(String, String) = from_body_to_hash(@conf["body"])
       body = ""
       sb = String::Builder.new
+      # content-type 別の処理
       case @conf["content_type"]
       when "application/x-www-form-urlencoded" then
-        # Normal form data
+        # 普通のフォームデータ
+        i = 0
         hashbody.each do |k, v|
           sb << (k + "=" + v)
-          sb << "&"
+          if i < hashbody.size - 1
+            sb << "&"
+          end
+          i += 1
         end
         body = sb.to_s
         body = body[0 .. body.size - 1]
       when "multipart/form-data" then
-        # Multipart form data
+        # マルチパートフォームデータ
         body = get_mpdata()
       when "application/json" then
         # JSON
@@ -139,8 +209,10 @@ module Funa
         body += "</data>"
       when "application/octed-stream" then
         # BLOB / ArrayBuffer
-        if File.exists?(@conf["body"])
-          body = File.read(@conf["body"])
+        body = @conf["body"]
+        # body 内容がファイルパスならファイル内容を body とする。(そうでない場合は、body をデータ内容としてそのまま使う)
+        if File.exists?(body)
+          body = File.read(body)
         end
       else
         raise Exception.new("bad content_type.")
@@ -148,186 +220,45 @@ module Funa
       return body
     end
 
-    # get multipart form data
+    # リクエストファイルの body 内容をマルチパートフォームデータに変換する。
     def get_mpdata() : String
       bodysrc = @conf["body"]
-      p! bodysrc
+      # MultipartData クラスをインスタンス化する。
       mdata = MultipartData.new
+      # リクエストファイルの body 内容を ", " で分割する。
       parts = bodysrc.split(", ")
+      # その分割した部分ごとに処理する。
       parts.each do |s|
+        # その部分に "filename=" が含まれる場合、type="file" コントロールとみなす。
         n = s.index("filename=")
         if !n.nil? && n.as(Int32) > 0
-          parts = s.split("; ")
-          parts1 = parts[0].split("=")
+          parts = s.split("; ")  # "; "で分割する。
+          parts1 = parts[0].strip.split("=")
           if parts1[0] == "name"
+            # name=... の場合
             name = parts1[1]
             parts2 = parts[1].split("=")
-            if parts2[0] == "filename"
+            if parts2[0] == "filename"  # "; " で分割した２番目の部分の先頭が "filename=" である場合
               filepath = parts2[1]
-              mdata.add_file(name, filepath)
+              mdata.add_file(name, filepath)  # file=...の値がファイルパスとして name とともに mdata に追加する。
             else
+              # "filename=" 以外である場合、エラーとする。
               raise Exception.new("Body has no filename.")
             end
           else
+            # "name=" がない場合はエラー
             raise Exception.new("Body has no name.")
           end
         else
-          parts1 = s.split("; ")
-          if parts1[0].starts_with?("name=")
-            parts2 = parts1[0].split("=")
-            name = parts2[1]
-            if parts1[1].starts_with?("value=")
-              parts3 = parts1[1].split("=")
-              value = parts3[1]
-              mdata.add_item(name, value)
-            end
-          else
-            raise Exception.new("Bad body data.")
-          end
+          # type="file" コントロール でない場合
+          parts2 = s.split("=")
+          name = parts2[0]
+          value = parts2[1]
+          mdata.add_item(name, value)  # mdata に name と value を追加する。
         end
       end
-      return mdata.to_s
-    end
-        
-    # Add cookies to headers (Class method)
-    def self.add_cookies(headers : HTTP::Headers) : HTTP::Headers
-      if File.exists?(COOKIES_FILE)
-        s = File.read(COOKIES_FILE)
-        cookies = Hash(String, String).from_json(s)
-        cookies.each do |kv|
-          cookie_name = kv[0]
-          cookie_value = kv[1]
-          p1 = cookie_value.index("Expires=")
-          p2 = cookie_value.index("Max-Age=")
-          if !p1.nil? && p1 > 0
-            q = cookie_value[p1 ..].index(";")
-            expire = cookie_value[p1 + "Expires=".size .. q]
-            parts = expire.split(" ")
-            a = parts[0]
-            parts[0] = parts[1]
-            parts[1] = a
-            expire = parts.join(" ")
-            expire_t = Time::Format::HTTP_DATE.parse(expire)
-            if expire_t > Time.utc
-              cookies[cookie_name] = cookie_value
-            end
-          elsif !p2.nil? && p2 > 0
-            q = cookie_value[p2 ..].index(";")
-            max_age = cookie_value[p2 + "Max-Age=".size .. q]
-            max_age_n = max_age.to_i32()
-            if max_age_n > 0
-              cookies[cookie_name] = cookie_value
-            end
-          else
-            cookies[cookie_name] = cookie_value
-          end
-        end
-        headers["cookie"] = cookies.to_s()
-       end
-      return headers
-    end
-  end # of class
-
-  # Multipart/Form-Data class
-  class MultipartData
-    # constructor
-    def initialize(border : String = BOUNDARY)
-      @border = "--" + border
-      @mdata = [] of String
-    end
-
-    # add form control data
-    def add_item(name : String, value : String)
-      s = @border + "\n"
-      s += %(Content-Disposition: form-data; name="#{name}"\n\n)
-      s += value + "\n"
-      @mdata.push(s)
-    end
-
-    # add file control data
-    def add_file(name : String, filepath : String)
-      filename = File.basename(filepath)
-      s = @border + "\n"
-      s += %(Content-Disposition: form-data; name="#{name}"; filename="#{filename}"\n)
-      s += %(Content-Type: application/octet-stream\n\n)
-      fdata = File.read(filepath)
-      s += fdata + "\n"
-      @mdata.push(s)
-    end
-
-    # add blob / arrayBuffer data
-    def add_blob(name : String, data : Slice(UInt8))
-      s = @border + "\n"
-      s += %(Content-Disposition: form-data; name="#{name}"\n)
-      s += %(Content-Type: application/octed-stream\n\n)
-      s += data.to_s + "\n"
-      @mdata.push(s)
-    end
-
-    # serialize form data
-    def to_s()
-      s = ""
-      @mdata.each do |x|
-        s += x
-      end
-      s += @border + "--\n"
+      return mdata.to_s  # mdata を文字列に変換して関数値として返す。
     end
 
   end # of class
-  
-  # main
-  def main()
-    puts "<< Funa HTTP Client " + VERSION + " >>"
-    begin
-      client = FunaClient.new
-    rescue e
-      puts e.message
-    end
-  end
-
-  # Test multipart/form-data  
-  def test_multipart(n = 0)
-    o = MultipartData.new
-    case n
-    when 0
-      o.add_item("text1", "TEXT1")
-      o.add_item("check1", "C1")
-      o.add_item("check2", "")
-      p o.to_s
-    when 1
-      o.add_item("text1", "TEXT1")
-      o.add_file("file1", "./cookies.json")
-      p o.to_s
-    when 2
-      o.add_item("text1", "TEXT1")
-      data = Slice(UInt8).new(5)
-      data.fill(0x45)
-      o.add_blob("blob1", data)
-      p o.to_s    
-    else
-      o.add_item("text1", "TEXT1")
-      o.add_item("text2", "TEXT2")
-      o.add_item("check1", "C1")
-      o.add_item("check2", "")
-      p o.to_s   
-    end
-  end
-
-  # Test cookies
-  def test_cookie()
-    headers = HTTP::Headers.new
-    headers["accept"] = "text/html"
-    headers = FunaClient.add_cookies(headers)
-    headers.each do |kv|
-      name = kv[0]
-      value = kv[1]
-      puts name + "=>" + value.to_s
-    end
-  end
-
-end # of Module
-
-# start
-Funa.main()
-#Funa.test_multipart(2)
-#Funa.test_cookie()
+end # of module

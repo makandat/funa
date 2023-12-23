@@ -1,0 +1,12 @@
+{
+  "method" : "POST",
+  "scheme" : "http",
+  "host" : "localhost",
+  "port" : "2023",
+  "path" : "/cookie2",
+  "query" : "",
+  "body" : "name=XY, value=987, expires=2023-12-01 00:00:01",
+  "content_type" : "multipart/form-data",
+  "headers" : "user-agent=funa, host=localhost:2023",
+  "multipart" : "true"
+}

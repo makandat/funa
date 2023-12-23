@@ -1,0 +1,12 @@
+{
+  "method" : "GET",
+  "scheme" : "http",
+  "host" : "localhost",
+  "port" : "2023",
+  "path" : "/cgi-bin/echo.cgi",
+  "query" : "message=Hello%20World!",
+  "body" : "",
+  "content_type" : "",
+  "headers" : "user-agent=funa, host=localhost",
+  "multipart" : "false"
+}

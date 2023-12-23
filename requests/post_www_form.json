@@ -1,0 +1,12 @@
+{
+  "method" : "POST",
+  "scheme" : "http",
+  "host" : "localhost",
+  "port" : "2023",
+  "path" : "/post_www_form",
+  "query" : "",
+  "body" : "id=1022, name=Bob, sex=male",
+  "content_type" : "application/x-www-form-urlencoded",
+  "headers" : "user-agent=funa; host=localhost",
+  "multipart" : "false"
+}

@@ -1,0 +1,12 @@
+{
+  "method" : "GET",
+  "scheme" : "http",
+  "host" : "localhost",
+  "port" : "2023",
+  "path" : "/ws_test",
+  "query" : "x=0.5&y=2.8&z=5.9",
+  "body" : "",
+  "content_type" : "",
+  "headers" : "user-agent=funa, host=localhost",
+  "multipart" : "false"
+}
